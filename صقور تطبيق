@@ -1,0 +1,400 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+// دالة تحويل البيانات إلى CSV
+function toCSV(rows, headers) {
+  const esc = v => `"${String(v||'').replace(/"/g, '""')}"`;
+  return [
+    headers.map(esc).join(','),
+    ...rows.map(row => headers.map(h => esc(row[h])).join(','))
+  ].join('\n');
+}
+
+// دالة قراءة CSV وتحويله إلى كائنات
+function fromCSV(text) {
+  const lines = text.split('\n').filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.replace(/(^"|"$)/g, '').replace(/""/g, '"'));
+  return lines.slice(1).map(line => {
+    const values = line.split(',').map(v => v.replace(/(^"|"$)/g, '').replace(/""/g, '"'));
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = values[i]);
+    obj.id = Date.now() + Math.random(); // generate new id
+    return obj;
+  });
+}
+
+export default function App() {
+  // الحماية بكلمة مرور
+  const [password, setPassword] = useState('');
+  const [authenticated, setAuthenticated] = useState(false);
+
+  // الأرشيف
+  const [soldiers, setSoldiers] = useState([]);
+  const [form, setForm] = useState({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' });
+  const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' });
+  const fileRef = useRef();
+
+  // تحميل الأرشيف من LocalStorage عند بدء التطبيق
+  useEffect(() => {
+    const saved = localStorage.getItem('soldiers-archive-v2');
+    if (saved) setSoldiers(JSON.parse(saved));
+  }, []);
+
+  // حفظ الأرشيف عند أي تغيير
+  useEffect(() => {
+    localStorage.setItem('soldiers-archive-v2', JSON.stringify(soldiers));
+  }, [soldiers]);
+
+  // معالجة الإدخال للفورم
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  // إضافة جندي جديد
+  const handleAddSoldier = (e) => {
+    e.preventDefault();
+    if (!form.name || !form.rank || !form.number || !form.unit) return;
+    setSoldiers([...soldiers, { ...form, id: Date.now() }]);
+    setForm({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' });
+  };
+
+  // حذف جندي
+  const handleDelete = (id) => {
+    setSoldiers(soldiers.filter(s => s.id !== id));
+    if (editingId === id) {
+      setEditingId(null);
+      setEditForm({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' });
+    }
+  };
+
+  // بدء التعديل
+  const startEdit = (soldier) => {
+    setEditingId(soldier.id);
+    setEditForm({
+      name: soldier.name,
+      rank: soldier.rank,
+      number: soldier.number,
+      unit: soldier.unit,
+      birth: soldier.birth || '',
+      notes: soldier.notes || ''
+    });
+  };
+
+  // فرم التعديل
+  const handleEditChange = (e) => setEditForm({ ...editForm, [e.target.name]: e.target.value });
+
+  // حفظ التعديل
+  const saveEdit = (id) => {
+    setSoldiers(soldiers.map(s => s.id === id ? { ...s, ...editForm } : s));
+    setEditingId(null);
+    setEditForm({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' });
+  };
+
+  // بحث
+  const filteredSoldiers = soldiers.filter(s =>
+    (s.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (s.number || '').toLowerCase().includes(search.toLowerCase()) ||
+    (s.unit || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  // تصدير CSV
+  const handleExport = () => {
+    const headers = ['name', 'rank', 'number', 'unit', 'birth', 'notes'];
+    const csv = toCSV(soldiers, headers);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'soldiers-archive.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  // استيراد CSV
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imported = fromCSV(e.target.result);
+      if (imported.length) setSoldiers([...soldiers, ...imported]);
+    };
+    reader.readAsText(file);
+    fileRef.current.value = "";
+  };
+
+  // شاشة كلمة المرور
+  if (!authenticated) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "#f3f4f6"
+      }}>
+        <form onSubmit={e => { e.preventDefault(); if (password === "123456") setAuthenticated(true); else alert("كلمة مرور خاطئة!"); }}>
+          <div style={{
+            background: "#fff", padding: 40, borderRadius: 16, boxShadow: "0 2px 10px #0001", minWidth: 300, textAlign: 'center'
+          }}>
+            <h2>أرشيف الجنود</h2>
+            <input
+              type="password"
+              placeholder="كلمة المرور"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              style={{ padding: 10, margin: "20px 0", width: "90%", border: "1px solid #ccc", borderRadius: 6, fontSize: 17 }}
+            />
+            <br />
+            <button type="submit" style={{
+              background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, padding: "10px 30px", cursor: "pointer"
+            }}>دخول</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 900, margin: 'auto', padding: 20 }}>
+      <h1 style={{ textAlign: 'center' }}>أرشيف الجنود</h1>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginBottom: 16 }}>
+        <button onClick={handleExport} style={{
+          padding: "8px 18px", background: "#22c55e", color: "#fff",
+          border: "none", borderRadius: "6px", cursor: "pointer"
+        }}>تصدير Excel</button>
+        <label style={{ background: '#2563eb', color: '#fff', padding: "8px 18px", borderRadius: 6, cursor: "pointer" }}>
+          استيراد Excel
+          <input type="file" accept=".csv" ref={fileRef} style={{ display: 'none' }} onChange={handleImport} />
+        </label>
+      </div>
+
+      <form onSubmit={handleAddSoldier} style={{
+        display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20, alignItems: 'center', justifyContent: 'center'
+      }}>
+        <input
+          name="name"
+          placeholder="اسم الجندي"
+          value={form.name}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 120 }}
+        />
+        <input
+          name="rank"
+          placeholder="الرتبة"
+          value={form.rank}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 100 }}
+        />
+        <input
+          name="number"
+          placeholder="الرقم العسكري"
+          value={form.number}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 100 }}
+        />
+        <input
+          name="unit"
+          placeholder="الوحدة"
+          value={form.unit}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 90 }}
+        />
+        <input
+          name="birth"
+          type="date"
+          placeholder="تاريخ الميلاد"
+          value={form.birth}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 120 }}
+        />
+        <input
+          name="notes"
+          placeholder="ملاحظات"
+          value={form.notes}
+          onChange={handleChange}
+          style={{ padding: 6, borderRadius: 4, border: '1px solid #ccc', minWidth: 130 }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: '8px 18px',
+            background: "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer"
+          }}
+        >
+          إضافة
+        </button>
+      </form>
+
+      <input
+        type="text"
+        placeholder="بحث بالاسم أو الرقم العسكري أو الوحدة"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        style={{
+          width: '100%',
+          padding: 8,
+          marginBottom: 18,
+          borderRadius: 5,
+          border: '1px solid #bbb',
+          fontSize: 16
+        }}
+      />
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
+        <thead>
+          <tr style={{ background: "#f1f5f9" }}>
+            <th>الاسم</th>
+            <th>الرتبة</th>
+            <th>الرقم العسكري</th>
+            <th>الوحدة</th>
+            <th>تاريخ الميلاد</th>
+            <th>ملاحظات</th>
+            <th>تعديل</th>
+            <th>حذف</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredSoldiers.length === 0 ? (
+            <tr>
+              <td colSpan={8} style={{ textAlign: 'center', color: '#999' }}>لا توجد بيانات</td>
+            </tr>
+          ) : (
+            filteredSoldiers.map(s => (
+              <tr key={s.id} style={editingId === s.id ? { background: "#fef9c3" } : {}}>
+                {editingId === s.id ? (
+                  <>
+                    <td>
+                      <input
+                        name="name"
+                        value={editForm.name}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 70 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        name="rank"
+                        value={editForm.rank}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 60 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        name="number"
+                        value={editForm.number}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 70 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        name="unit"
+                        value={editForm.unit}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 60 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        name="birth"
+                        type="date"
+                        value={editForm.birth}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 90 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        name="notes"
+                        value={editForm.notes}
+                        onChange={handleEditChange}
+                        style={{ padding: 4, borderRadius: 3, border: '1px solid #ccc', minWidth: 90 }}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => saveEdit(s.id)}
+                        style={{
+                          background: "#10b981",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          padding: "4px 12px"
+                        }}
+                      >
+                        حفظ
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => { setEditingId(null); setEditForm({ name: '', rank: '', number: '', unit: '', birth: '', notes: '' }); }}
+                        style={{
+                          background: "#f59e42",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          padding: "4px 12px"
+                        }}
+                      >
+                        إلغاء
+                      </button>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td>{s.name}</td>
+                    <td>{s.rank}</td>
+                    <td>{s.number}</td>
+                    <td>{s.unit}</td>
+                    <td>{s.birth}</td>
+                    <td>{s.notes}</td>
+                    <td>
+                      <button
+                        onClick={() => startEdit(s)}
+                        style={{
+                          background: "#2563eb",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          padding: "4px 12px"
+                        }}
+                      >
+                        تعديل
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => handleDelete(s.id)}
+                        style={{
+                          background: "#ef4444",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          padding: "4px 12px"
+                        }}
+                      >
+                        حذف
+                      </button>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+      <div style={{ marginTop: 40, color: "#888", textAlign: "center", fontSize: 13 }}>
+        كلمة المرور الافتراضية: <b>123456</b> &mdash; يمكنك تغييرها من الكود
+      </div>
+    </div>
+  );
+}
